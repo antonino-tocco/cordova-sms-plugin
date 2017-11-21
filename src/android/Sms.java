@@ -1,5 +1,6 @@
 package com.cordova.plugins.sms;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PendingIntent;
@@ -29,6 +30,8 @@ public class Sms extends CordovaPlugin {
 
 	private static final int SEND_SMS_REQ_CODE = 0;
 
+	private static final int READ_PHONE_STATE_REQ_CODE = 1;
+
 	private CallbackContext callbackContext;
 
 	private JSONArray args;
@@ -38,13 +41,7 @@ public class Sms extends CordovaPlugin {
 		this.callbackContext = callbackContext;
 		this.args = args;
 		if (action.equals(ACTION_SEND_SMS)) {
-			boolean isIntent = false;
-			try {
-				isIntent = args.getString(2).equalsIgnoreCase("INTENT");
-			} catch (NullPointerException npe) {
-				// It might throw a NPE, but it doesn't matter.
-			}
-			if (isIntent || hasPermission()) {
+			if (hasPermission()) {
 				sendSMS();
 			} else {
 				requestPermission();
@@ -66,11 +63,25 @@ public class Sms extends CordovaPlugin {
 		cordova.requestPermission(this, SEND_SMS_REQ_CODE, android.Manifest.permission.SEND_SMS);
 	}
 
+	private boolean hasPermissionReadPhoneState() {
+		return cordova.hasPermission(Manifest.permission.READ_PHONE_STATE);
+	}
+
+	private void requestReadPhoneStatePermission() {
+		cordova.requestPermission(this, READ_PHONE_STATE_REQ_CODE, Manifest.permission.READ_PHONE_STATE);
+	}
+
 	public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
 		for (int r : grantResults) {
-			if (r == PackageManager.PERMISSION_DENIED) {
-				callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "User has denied permission"));
-				return;
+			if (requestCode == READ_PHONE_STATE_REQ_CODE) {
+				if (r == PackageManager.PERMISSION_GRANTED) {
+					sendSMS();
+				}
+			} else {
+				if (r == PackageManager.PERMISSION_DENIED) {
+					callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "User has denied permission"));
+					return;
+				}
 			}
 		}
 		sendSMS();
@@ -105,7 +116,11 @@ public class Sms extends CordovaPlugin {
 						// always passes success back to the app
 						callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK));
 					} else {
-						send(callbackContext, phoneNumber, message);
+						if (hasPermissionReadPhoneState()) {
+							send(callbackContext, phoneNumber, message);
+						} else {
+							requestReadPhoneStatePermission();
+						}
 					}
 					return;
 				} catch (JSONException ex) {
@@ -157,15 +172,15 @@ public class Sms extends CordovaPlugin {
 			@Override
 			public void onReceive(Context context, Intent intent) {
 				switch (getResultCode()) {
-				case SmsManager.STATUS_ON_ICC_SENT:
-				case Activity.RESULT_OK:
-					break;
-				case SmsManager.RESULT_ERROR_GENERIC_FAILURE:
-				case SmsManager.RESULT_ERROR_NO_SERVICE:
-				case SmsManager.RESULT_ERROR_NULL_PDU:
-				case SmsManager.RESULT_ERROR_RADIO_OFF:
-					anyError = true;
-					break;
+					case SmsManager.STATUS_ON_ICC_SENT:
+					case Activity.RESULT_OK:
+						break;
+					case SmsManager.RESULT_ERROR_GENERIC_FAILURE:
+					case SmsManager.RESULT_ERROR_NO_SERVICE:
+					case SmsManager.RESULT_ERROR_NULL_PDU:
+					case SmsManager.RESULT_ERROR_RADIO_OFF:
+						anyError = true;
+						break;
 				}
 				// trigger the callback only when all the parts have been sent
 				partsCount--;
